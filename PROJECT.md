@@ -1,0 +1,49 @@
+# My Sports project specification
+
+## Purpose
+Personal sports dashboard designed primarily for Alex's Samsung Galaxy Z Fold.
+
+## Teams
+- Tottenham Hotspur, SofaScore team ID `33`
+- Bath Rugby, SofaScore team ID `4196`
+- England football, SofaScore team ID `4713`
+- England rugby, SofaScore team ID `4226`
+
+## Current behaviour
+Each team card shows:
+- team badge
+- team name and sport
+- latest completed fixture
+- latest score
+- competition
+- next fixture
+- UK date and kick-off time
+
+## Interactions
+- tapping a team header opens that team's SofaScore page
+- tapping a previous result opens that exact SofaScore event
+- tapping a next fixture opens that exact SofaScore event
+- automatic refresh every 5 minutes while open
+- refresh when the app returns to the foreground
+- manual Refresh button
+- last successful data is retained locally as fallback if the live feed is temporarily unavailable
+
+## Design
+- dark interface
+- rounded cards
+- compact mobile-first layout
+- responsive on a Galaxy Z Fold
+- preserve the current visual style unless Alex explicitly asks for a redesign
+
+## Data source
+The app uses SofaScore's public JSON endpoints. They are not an officially documented public API, so future maintenance may be needed if SofaScore changes them.
+
+## Deployment
+Installable Progressive Web App hosted with GitHub Pages from this repository.
+
+## Maintenance instructions for future ChatGPT sessions
+This repository is the source of truth. Before changing the app:
+1. Read this file.
+2. Read the current `index.html`, `manifest.webmanifest` and `service-worker.js`.
+3. Preserve existing functionality unless the user explicitly asks to change it.
+4. Update this document if product behaviour or team coverage changes.
