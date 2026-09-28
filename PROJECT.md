@@ -23,7 +23,8 @@ Each team card shows:
 - tapping a team header opens that team's SofaScore page
 - tapping a previous result opens that exact SofaScore event
 - tapping a next fixture opens that exact SofaScore event
-- automatic refresh every 5 minutes while open
+- the app checks its own hosted `data.json` every 5 minutes while open
+- GitHub Actions refreshes the source data automatically
 - refresh when the app returns to the foreground
 - manual Refresh button
 - last successful data is retained locally as fallback if the live feed is temporarily unavailable
@@ -36,7 +37,7 @@ Each team card shows:
 - preserve the current visual style unless Alex explicitly asks for a redesign
 
 ## Data source
-The app uses SofaScore's public JSON endpoints. They are not an officially documented public API, so future maintenance may be needed if SofaScore changes them.
+The installed app reads `data.json` from its own GitHub Pages origin. A GitHub Actions updater fetches fixture and result data from ESPN public schedule endpoints on a recurring basis. This avoids browser CORS restrictions. Team headers continue to open SofaScore. Match cards use the exact event URL supplied by the active data source.
 
 ## Deployment
 Installable Progressive Web App hosted with GitHub Pages from this repository.
