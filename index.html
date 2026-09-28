@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101114">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="My Sports">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <title>My Sports</title>
+  <style>
+    :root{
+      color-scheme:dark;
+      --bg:#0c0d10;
+      --panel:#15171c;
+      --panel2:#1b1e24;
+      --text:#f5f7fa;
+      --muted:#9ca3af;
+      --line:#2a2e36;
+      --radius:22px;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+    body{
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+      min-height:100vh;
+      padding-top:env(safe-area-inset-top);
+      padding-bottom:env(safe-area-inset-bottom);
+    }
+    .wrap{
+      width:min(760px,100%);
+      margin:0 auto;
+      padding:22px 14px 40px;
+    }
+    header{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:16px;
+      margin:4px 4px 18px;
+    }
+    h1{
+      margin:0;
+      font-size:30px;
+      font-weight:780;
+      letter-spacing:-.04em;
+    }
+    .updated{
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.3;
+      text-align:right;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:12px;
+    }
+    .card{
+      overflow:hidden;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      background:linear-gradient(180deg,var(--panel2),var(--panel));
+      box-shadow:0 12px 30px rgba(0,0,0,.18);
+    }
+    .team{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:15px 16px 13px;
+      border-bottom:1px solid var(--line);
+      color:inherit;
+      text-decoration:none;
+      -webkit-tap-highlight-color:transparent;
+      transition:background .15s ease,transform .08s ease;
+    }
+    .team:active{background:rgba(255,255,255,.07);transform:scale(.997)}
+    .badge{
+      width:40px;
+      height:40px;
+      object-fit:contain;
+      border-radius:9px;
+      background:#fff;
+      padding:3px;
+      flex:0 0 40px;
+    }
+    .team-copy{min-width:0;flex:1}
+    .team-name{
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-size:18px;
+      line-height:1.15;
+      font-weight:760;
+    }
+    .sport{
+      margin-top:3px;
+      color:var(--muted);
+      font-size:12px;
+    }
+    .matches{display:grid;grid-template-columns:1fr 1fr}
+    .match{
+      display:block;
+      min-width:0;
+      padding:14px 15px 16px;
+      color:inherit;
+      text-decoration:none;
+      -webkit-tap-highlight-color:transparent;
+      transition:background .15s ease,transform .08s ease;
+    }
+    .match[href]:active{background:rgba(255,255,255,.07);transform:scale(.995)}
+    .match + .match{border-left:1px solid var(--line)}
+    .label{
+      margin-bottom:9px;
+      color:var(--muted);
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .teams{
+      min-height:38px;
+      font-size:14px;
+      font-weight:650;
+      line-height:1.35;
+    }
+    .score{
+      margin-top:8px;
+      font-size:25px;
+      font-weight:800;
+      line-height:1;
+      letter-spacing:-.04em;
+    }
+    .date{
+      margin-top:8px;
+      font-size:14px;
+      font-weight:700;
+    }
+    .competition{
+      overflow:hidden;
+      margin-top:5px;
+      color:var(--muted);
+      font-size:11px;
+      line-height:1.3;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .loading,.error{padding-top:5px;color:var(--muted);font-size:13px}
+    .footer{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin:16px 4px 0;
+      color:var(--muted);
+      font-size:11px;
+    }
+    .actions{display:flex;gap:8px;align-items:center}
+    button{
+      appearance:none;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:var(--panel);
+      color:var(--text);
+      padding:9px 13px;
+      font:inherit;
+      font-weight:700;
+      cursor:pointer;
+    }
+    #install{display:none}
+    @media(min-width:700px){
+      .grid{grid-template-columns:1fr 1fr}
+      .wrap{padding-top:30px}
+    }
+    @media(max-width:420px){
+      h1{font-size:27px}
+      .matches{grid-template-columns:1fr}
+      .match + .match{border-left:0;border-top:1px solid var(--line)}
+      .teams{min-height:auto}
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <h1>My Sports</h1>
+      <div class="updated" id="updated">Loading…</div>
+    </header>
+
+    <section class="grid" id="grid"></section>
+
+    <div class="footer">
+      <span>Fixtures and results from SofaScore.</span>
+      <div class="actions">
+        <button type="button" id="install">Install app</button>
+        <button type="button" id="refresh">Refresh</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const teams = [
+      {
+        id:33,
+        name:"Tottenham Hotspur",
+        sport:"Football",
+        apiSport:"football",
+        teamUrl:"https://www.sofascore.com/football/team/tottenham-hotspur/33"
+      },
+      {
+        id:4196,
+        name:"Bath Rugby",
+        sport:"Rugby Union",
+        apiSport:"rugby",
+        teamUrl:"https://www.sofascore.com/rugby/team/bath-rugby/4196"
+      },
+      {
+        id:4713,
+        name:"England Football",
+        sport:"Football",
+        apiSport:"football",
+        teamUrl:"https://www.sofascore.com/football/team/england/4713"
+      },
+      {
+        id:4226,
+        name:"England Rugby",
+        sport:"Rugby Union",
+        apiSport:"rugby",
+        teamUrl:"https://www.sofascore.com/rugby/team/england/4226"
+      }
+    ];
+
+    const API = "https://api.sofascore.com/api/v1";
+
+    function esc(value){
+      return String(value ?? "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;");
+    }
+
+    function score(event){
+      const home =
+        event?.homeScore?.current ??
+        event?.homeScore?.display ??
+        event?.homeScore?.normaltime;
+      const away =
+        event?.awayScore?.current ??
+        event?.awayScore?.display ??
+        event?.awayScore?.normaltime;
+      if(home == null || away == null) return "Final";
+      return `${home} - ${away}`;
+    }
+
+    function when(timestamp){
+      if(!timestamp) return "Date TBC";
+      const date = new Date(timestamp * 1000);
+      const day = new Intl.DateTimeFormat("en-GB",{
+        weekday:"short",
+        day:"numeric",
+        month:"short",
+        timeZone:"Europe/London"
+      }).format(date);
+      const time = new Intl.DateTimeFormat("en-GB",{
+        hour:"2-digit",
+        minute:"2-digit",
+        hour12:false,
+        timeZone:"Europe/London"
+      }).format(date);
+      return `${day} · ${time}`;
+    }
+
+    function competition(event){
+      return event?.tournament?.name || event?.uniqueTournament?.name || "";
+    }
+
+    function matchTeams(event){
+      if(!event) return "No fixture found";
+      return `${esc(event.homeTeam?.name || "TBC")} vs ${esc(event.awayTeam?.name || "TBC")}`;
+    }
+
+    function matchUrl(event, fallbackSport){
+      if(!event?.id) return "";
+      const sport =
+        event?.tournament?.category?.sport?.slug ||
+        event?.sport?.slug ||
+        fallbackSport ||
+        "football";
+      const slug =
+        event?.slug ||
+        [event?.homeTeam?.slug,event?.awayTeam?.slug].filter(Boolean).join("-");
+      const customId = event?.customId || event?.custom_id;
+
+      if(slug && customId){
+        return `https://www.sofascore.com/${encodeURIComponent(sport)}/match/${encodeURIComponent(slug)}/${encodeURIComponent(customId)}#id:${event.id}`;
+      }
+      return `https://www.sofascore.com/event/${event.id}`;
+    }
+
+    function saveSnapshot(teamId,data){
+      try{
+        localStorage.setItem(`mySports:${teamId}`,JSON.stringify({
+          savedAt:Date.now(),
+          data
+        }));
+      }catch(e){}
+    }
+
+    function loadSnapshot(teamId){
+      try{
+        const raw = localStorage.getItem(`mySports:${teamId}`);
+        return raw ? JSON.parse(raw) : null;
+      }catch(e){
+        return null;
+      }
+    }
+
+    async function getJson(url){
+      const response = await fetch(url,{cache:"no-store"});
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    }
+
+    async function loadTeam(team){
+      const [past,next] = await Promise.all([
+        getJson(`${API}/team/${team.id}/events/last/0`),
+        getJson(`${API}/team/${team.id}/events/next/0`)
+      ]);
+
+      const data = {
+        past:past?.events?.[0] || null,
+        next:next?.events?.[0] || null
+      };
+      saveSnapshot(team.id,data);
+      return data;
+    }
+
+    function shell(team){
+      return `
+        <article class="card" id="team-${team.id}">
+          <a class="team" href="${team.teamUrl}" aria-label="Open ${esc(team.name)} in SofaScore">
+            <img class="badge"
+              src="${API}/team/${team.id}/image"
+              alt=""
+              onerror="this.style.visibility='hidden'">
+            <div class="team-copy">
+              <div class="team-name">${esc(team.name)}</div>
+              <div class="sport">${esc(team.sport)} · Tap for team</div>
+            </div>
+          </a>
+          <div class="matches">
+            <a class="match previous" aria-label="Open last result in SofaScore">
+              <div class="label">Last result</div>
+              <div class="loading">Loading…</div>
+            </a>
+            <a class="match next" aria-label="Open next fixture in SofaScore">
+              <div class="label">Next fixture</div>
+              <div class="loading">Loading…</div>
+            </a>
+          </div>
+        </article>`;
+    }
+
+    function renderMatch(element,event,isPast,fallbackSport){
+      if(!event){
+        element.removeAttribute("href");
+        element.innerHTML = `
+          <div class="label">${isPast ? "Last result" : "Next fixture"}</div>
+          <div class="teams">No ${isPast ? "recent result" : "upcoming fixture"} found</div>`;
+        return;
+      }
+
+      const url = matchUrl(event,fallbackSport);
+      if(url) element.href = url;
+
+      element.innerHTML = `
+        <div class="label">${isPast ? "Last result" : "Next fixture"} · Tap to open</div>
+        <div class="teams">${matchTeams(event)}</div>
+        ${isPast
+          ? `<div class="score">${esc(score(event))}</div>`
+          : `<div class="date">${esc(when(event.startTimestamp))}</div>`}
+        <div class="competition">${esc(competition(event))}</div>`;
+    }
+
+    async function refresh(){
+      const button = document.getElementById("refresh");
+      button.disabled = true;
+      document.getElementById("updated").textContent = "Refreshing…";
+
+      await Promise.all(teams.map(async team => {
+        const card = document.getElementById(`team-${team.id}`);
+        const previous = card.querySelector(".previous");
+        const next = card.querySelector(".next");
+
+        try{
+          const data = await loadTeam(team);
+          renderMatch(previous,data.past,true,team.apiSport);
+          renderMatch(next,data.next,false,team.apiSport);
+        }catch(error){
+          const cached = loadSnapshot(team.id);
+          if(cached?.data){
+            renderMatch(previous,cached.data.past,true,team.apiSport);
+            renderMatch(next,cached.data.next,false,team.apiSport);
+          }else{
+            const message = `
+              <div class="label">Data unavailable</div>
+              <div class="error">Could not reach the live sports feed. Tap Refresh to try again.</div>`;
+            previous.innerHTML = message;
+            next.innerHTML = message;
+          }
+        }
+      }));
+
+      const now = new Intl.DateTimeFormat("en-GB",{
+        hour:"2-digit",
+        minute:"2-digit",
+        hour12:false,
+        day:"numeric",
+        month:"short",
+        timeZone:"Europe/London"
+      }).format(new Date());
+
+      document.getElementById("updated").textContent = `Updated ${now}`;
+      button.disabled = false;
+    }
+
+    document.getElementById("grid").innerHTML = teams.map(shell).join("");
+    document.getElementById("refresh").addEventListener("click",refresh);
+
+    document.addEventListener("visibilitychange",()=>{
+      if(document.visibilityState === "visible") refresh();
+    });
+
+    let installPrompt = null;
+    const installButton = document.getElementById("install");
+
+    window.addEventListener("beforeinstallprompt",event=>{
+      event.preventDefault();
+      installPrompt = event;
+      installButton.style.display = "inline-block";
+    });
+
+    installButton.addEventListener("click",async()=>{
+      if(!installPrompt) return;
+      installPrompt.prompt();
+      await installPrompt.userChoice;
+      installPrompt = null;
+      installButton.style.display = "none";
+    });
+
+    window.addEventListener("appinstalled",()=>{
+      installPrompt = null;
+      installButton.style.display = "none";
+    });
+
+    if("serviceWorker" in navigator){
+      window.addEventListener("load",()=>{
+        navigator.serviceWorker.register("./service-worker.js").catch(()=>{});
+      });
+    }
+
+    refresh();
+    setInterval(refresh,5 * 60 * 1000);
+  </script>
+</body>
+</html>
