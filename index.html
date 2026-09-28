@@ -193,7 +193,7 @@
     <section class="grid" id="grid"></section>
 
     <div class="footer">
-      <span>Fixtures and results from SofaScore.</span>
+      <span>Fixtures and results updated automatically.</span>
       <div class="actions">
         <button type="button" id="install">Install app</button>
         <button type="button" id="refresh">Refresh</button>
@@ -254,6 +254,7 @@
     }
 
     function matchUrl(event,fallbackSport){
+      if(event?.eventUrl) return event.eventUrl;
       if(!event?.id) return "";
       const sport =
         event?.sportSlug ||
