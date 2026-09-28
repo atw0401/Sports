@@ -30,9 +30,11 @@ TEAMS = [
 ]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; MySportsDashboard/1.0)",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 17) AppleWebKit/537.36 Chrome/140.0 Safari/537.36",
     "Accept": "application/json,text/plain,*/*",
     "Accept-Language": "en-GB,en;q=0.9",
+    "X-Requested-With": "XMLHttpRequest",
+    "Referer": "https://www.sofascore.com/",
 }
 
 def get_bytes(url):
@@ -166,6 +168,81 @@ def choose_events(events):
     next_event = min(upcoming, key=lambda x: x[0])[1] if upcoming else None
     return compact_event(last_event), compact_event(next_event)
 
+def sofascore_event(event, fallback_sport):
+    if not event:
+        return None
+
+    def sofa_score(side):
+        score = event.get(side + "Score") or {}
+        for key in ("current", "display", "normaltime"):
+            if score.get(key) is not None:
+                return score.get(key)
+        return None
+
+    home = event.get("homeTeam") or {}
+    away = event.get("awayTeam") or {}
+    tournament = event.get("tournament") or {}
+    category = tournament.get("category") or {}
+    sport = (category.get("sport") or event.get("sport") or {}).get("slug") or fallback_sport
+    event_id = event.get("id")
+    slug = event.get("slug") or "-".join(x for x in (home.get("slug"), away.get("slug")) if x)
+    custom_id = event.get("customId") or event.get("custom_id")
+
+    event_url = None
+    if event_id and slug and custom_id:
+        event_url = f"https://www.sofascore.com/{sport}/match/{slug}/{custom_id}#id:{event_id}"
+    elif event_id:
+        event_url = f"https://www.sofascore.com/event/{event_id}"
+
+    return {
+        "id": event_id,
+        "startTimestamp": event.get("startTimestamp"),
+        "homeTeam": {"name": home.get("name"), "slug": home.get("slug")},
+        "awayTeam": {"name": away.get("name"), "slug": away.get("slug")},
+        "homeScore": sofa_score("home"),
+        "awayScore": sofa_score("away"),
+        "tournament": tournament.get("name") or "",
+        "sportSlug": sport,
+        "slug": slug,
+        "customId": custom_id,
+        "eventUrl": event_url,
+    }
+
+def sofascore_data(team):
+    bases = [
+        "https://www.sofascore.com/api/v1",
+        "https://api.sofascore.com/api/v1",
+    ]
+    last_error = None
+
+    for base in bases:
+        try:
+            past_payload = get_json(f"{base}/team/{team['id']}/events/last/0")
+            next_payload = get_json(f"{base}/team/{team['id']}/events/next/0")
+            past_events = past_payload.get("events") or []
+            next_events = next_payload.get("events") or []
+
+            past = sofascore_event(past_events[0], team["apiSport"]) if past_events else None
+            future = sofascore_event(next_events[0], team["apiSport"]) if next_events else None
+
+            badge = None
+            try:
+                raw, content_type = get_bytes(f"{base}/team/{team['id']}/image")
+                if raw:
+                    mime = content_type or "image/png"
+                    badge = f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+            except Exception:
+                pass
+
+            if past is None and future is None:
+                raise RuntimeError("SofaScore returned no events")
+
+            return past, future, badge
+        except Exception as exc:
+            last_error = exc
+
+    raise last_error or RuntimeError("SofaScore unavailable")
+
 def soccer_data(team):
     events = []
     logo_payload = None
@@ -295,30 +372,45 @@ def team_badge(payload, team):
 def main():
     output = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
-        "source": "ESPN + TheSportsDB",
+        "source": "SofaScore with provider fallback",
         "teams": [],
     }
 
     for team in TEAMS:
         record = dict(team)
         try:
-            if team["espnSport"] == "soccer":
-                events, payload = soccer_data(team)
-                past, future = choose_events(events)
-            else:
-                past, future, payload = rugby_data(team)
-
+            # SofaScore is the preferred source because the app's click-through
+            # behaviour and original design were built around its event IDs.
+            past, future, badge = sofascore_data(team)
             record["past"] = past
             record["next"] = future
-            record["badge"] = team_badge(payload, team)
+            record["badge"] = badge
+            record["source"] = "SofaScore"
             record["ok"] = True
             record["error"] = None
-        except Exception as exc:
-            record["past"] = None
-            record["next"] = None
-            record["badge"] = None
-            record["ok"] = False
-            record["error"] = str(exc)
+        except Exception as sofa_exc:
+            try:
+                # Provider fallback keeps the app useful if SofaScore changes
+                # its anti-bot rules or has an outage.
+                if team["espnSport"] == "soccer":
+                    events, payload = soccer_data(team)
+                    past, future = choose_events(events)
+                else:
+                    past, future, payload = rugby_data(team)
+
+                record["past"] = past
+                record["next"] = future
+                record["badge"] = team_badge(payload, team)
+                record["source"] = "Fallback"
+                record["ok"] = True
+                record["error"] = f"SofaScore unavailable: {sofa_exc}"
+            except Exception as fallback_exc:
+                record["past"] = None
+                record["next"] = None
+                record["badge"] = None
+                record["source"] = None
+                record["ok"] = False
+                record["error"] = f"SofaScore: {sofa_exc}; fallback: {fallback_exc}"
         output["teams"].append(record)
 
     Path("data.json").write_text(
