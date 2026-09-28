@@ -1,4 +1,4 @@
-const CACHE = "my-sports-v1";
+const CACHE = "my-sports-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
