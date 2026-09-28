@@ -25,12 +25,12 @@ jobs:
 
       - name: Commit data if it changed
         run: |
-          if git diff --quiet -- data.json && [ -f data.json ]; then
+          if [ -z "$(git status --porcelain -- data.json)" ]; then
             echo "No sports data changes."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data.json
-          git commit -m "Update sports data" || exit 0
+          git commit -m "Update sports data"
           git push
