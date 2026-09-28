@@ -1,25 +1,47 @@
 #!/usr/bin/env python3
 import base64
 import json
-import mimetypes
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 TEAMS = [
-    {"id": 33, "name": "Tottenham Hotspur", "sport": "Football", "apiSport": "football",
-     "teamUrl": "https://www.sofascore.com/football/team/tottenham-hotspur/33"},
-    {"id": 4196, "name": "Bath Rugby", "sport": "Rugby Union", "apiSport": "rugby",
-     "teamUrl": "https://www.sofascore.com/rugby/team/bath-rugby/4196"},
-    {"id": 4713, "name": "England Football", "sport": "Football", "apiSport": "football",
-     "teamUrl": "https://www.sofascore.com/football/team/england/4713"},
-    {"id": 4226, "name": "England Rugby", "sport": "Rugby Union", "apiSport": "rugby",
-     "teamUrl": "https://www.sofascore.com/rugby/team/england/4226"},
-]
-
-API_BASES = [
-    "https://www.sofascore.com/api/v1",
-    "https://api.sofascore.com/api/v1",
+    {
+        "id": 33,
+        "espnId": 367,
+        "name": "Tottenham Hotspur",
+        "sport": "Football",
+        "apiSport": "football",
+        "espnSport": "soccer",
+        "teamUrl": "https://www.sofascore.com/football/team/tottenham-hotspur/33",
+    },
+    {
+        "id": 4196,
+        "espnId": 25898,
+        "name": "Bath Rugby",
+        "sport": "Rugby Union",
+        "apiSport": "rugby",
+        "espnSport": "rugby",
+        "teamUrl": "https://www.sofascore.com/rugby/team/bath-rugby/4196",
+    },
+    {
+        "id": 4713,
+        "espnId": 448,
+        "name": "England Football",
+        "sport": "Football",
+        "apiSport": "football",
+        "espnSport": "soccer",
+        "teamUrl": "https://www.sofascore.com/football/team/england/4713",
+    },
+    {
+        "id": 4226,
+        "espnId": 1,
+        "name": "England Rugby",
+        "sport": "Rugby Union",
+        "apiSport": "rugby",
+        "espnSport": "rugby",
+        "teamUrl": "https://www.sofascore.com/rugby/team/england/4226",
+    },
 ]
 
 HEADERS = {
@@ -28,93 +50,187 @@ HEADERS = {
 }
 
 def get_bytes(url):
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=25) as response:
+    request = urllib.request.Request(url, headers=HEADERS)
+    with urllib.request.urlopen(request, timeout=30) as response:
         return response.read(), response.headers.get_content_type()
 
 def get_json(url):
     raw, _ = get_bytes(url)
     return json.loads(raw.decode("utf-8"))
 
-def api_json(path):
+def schedule_payload(team):
+    urls = [
+        f"https://site.web.api.espn.com/apis/site/v2/sports/{team['espnSport']}/all/teams/{team['espnId']}/schedule?season=2026",
+        f"https://site.api.espn.com/apis/site/v2/sports/{team['espnSport']}/all/teams/{team['espnId']}/schedule?season=2026",
+    ]
     last_error = None
-    for base in API_BASES:
+    for url in urls:
         try:
-            return get_json(base + path)
+            payload = get_json(url)
+            if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+                return payload
         except Exception as exc:
             last_error = exc
-    raise last_error
+    if last_error:
+        raise last_error
+    raise RuntimeError("ESPN schedule returned no events list")
 
-def first_event(payload):
-    events = payload.get("events") or []
-    return events[0] if events else None
+def parse_time(value):
+    if not value:
+        return None
+    value = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
+
+def pick_competitors(event):
+    competitions = event.get("competitions") or []
+    competition = competitions[0] if competitions else {}
+    competitors = competition.get("competitors") or []
+
+    home = next((x for x in competitors if x.get("homeAway") == "home"), None)
+    away = next((x for x in competitors if x.get("homeAway") == "away"), None)
+
+    if not home and len(competitors) >= 1:
+        home = competitors[0]
+    if not away and len(competitors) >= 2:
+        away = competitors[1]
+
+    return competition, home or {}, away or {}
+
+def competitor_name(competitor):
+    team = competitor.get("team") or {}
+    return team.get("displayName") or team.get("shortDisplayName") or team.get("name")
+
+def competitor_slug(competitor):
+    team = competitor.get("team") or {}
+    return team.get("slug")
+
+def competitor_score(competitor):
+    score = competitor.get("score")
+    if isinstance(score, dict):
+        for key in ("displayValue", "value"):
+            if score.get(key) is not None:
+                return score.get(key)
+    if score is not None and not isinstance(score, dict):
+        return score
+    return None
+
+def event_completed(event):
+    competition, _, _ = pick_competitors(event)
+    status = competition.get("status") or event.get("status") or {}
+    status_type = status.get("type") or {}
+    if status_type.get("completed") is True:
+        return True
+    state = str(status_type.get("state") or "").lower()
+    name = str(status_type.get("name") or "").lower()
+    return state == "post" or "final" in name or name in {"status_full_time", "ft"}
+
+def event_competition(event):
+    league = event.get("league") or {}
+    if isinstance(league, dict):
+        for key in ("name", "displayName", "shortName"):
+            if league.get(key):
+                return league.get(key)
+
+    competition, _, _ = pick_competitors(event)
+    league = competition.get("league") or {}
+    if isinstance(league, dict):
+        for key in ("name", "displayName", "shortName"):
+            if league.get(key):
+                return league.get(key)
+
+    season_type = event.get("seasonType") or {}
+    if isinstance(season_type, dict):
+        return season_type.get("name")
+    return ""
+
+def event_url(event):
+    for link in event.get("links") or []:
+        if link.get("href"):
+            return link["href"]
+    competition, _, _ = pick_competitors(event)
+    for link in competition.get("links") or []:
+        if link.get("href"):
+            return link["href"]
+    return None
 
 def compact_event(event):
     if not event:
         return None
-
-    def score_value(side):
-        score = event.get(side + "Score") or {}
-        for key in ("current", "display", "normaltime"):
-            value = score.get(key)
-            if value is not None:
-                return value
-        return None
-
-    tournament = event.get("tournament") or {}
-    unique_tournament = event.get("uniqueTournament") or {}
-    category = tournament.get("category") or {}
-    sport = category.get("sport") or event.get("sport") or {}
-
+    competition, home, away = pick_competitors(event)
+    dt = parse_time(event.get("date") or competition.get("date"))
     return {
         "id": event.get("id"),
-        "slug": event.get("slug"),
-        "customId": event.get("customId") or event.get("custom_id"),
-        "startTimestamp": event.get("startTimestamp"),
+        "startTimestamp": int(dt.timestamp()) if dt else None,
         "homeTeam": {
-            "name": (event.get("homeTeam") or {}).get("name"),
-            "slug": (event.get("homeTeam") or {}).get("slug"),
+            "name": competitor_name(home),
+            "slug": competitor_slug(home),
         },
         "awayTeam": {
-            "name": (event.get("awayTeam") or {}).get("name"),
-            "slug": (event.get("awayTeam") or {}).get("slug"),
+            "name": competitor_name(away),
+            "slug": competitor_slug(away),
         },
-        "homeScore": score_value("home"),
-        "awayScore": score_value("away"),
-        "tournament": tournament.get("name") or unique_tournament.get("name"),
-        "sportSlug": sport.get("slug"),
+        "homeScore": competitor_score(home),
+        "awayScore": competitor_score(away),
+        "tournament": event_competition(event),
+        "eventUrl": event_url(event),
     }
 
-def fetch_badge(team_id):
-    urls = [
-        f"https://www.sofascore.com/api/v1/team/{team_id}/image",
-        f"https://api.sofascore.com/api/v1/team/{team_id}/image",
-    ]
-    for url in urls:
-        try:
-            raw, content_type = get_bytes(url)
-            if len(raw) < 128:
-                continue
-            mime = content_type or mimetypes.guess_type(url)[0] or "image/png"
-            return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
-        except Exception:
-            pass
-    return None
+def choose_events(payload):
+    now = datetime.now(timezone.utc)
+    events = payload.get("events") or []
+    parsed = []
+
+    for event in events:
+        competition, _, _ = pick_competitors(event)
+        dt = parse_time(event.get("date") or competition.get("date"))
+        if not dt:
+            continue
+        parsed.append((dt, event, event_completed(event)))
+
+    completed = [item for item in parsed if item[2] or item[0] < now]
+    upcoming = [item for item in parsed if not item[2] and item[0] >= now]
+
+    last_event = max(completed, key=lambda x: x[0])[1] if completed else None
+    next_event = min(upcoming, key=lambda x: x[0])[1] if upcoming else None
+    return compact_event(last_event), compact_event(next_event)
+
+def team_badge(payload):
+    team = payload.get("team") or {}
+    logo_url = team.get("logo")
+    if not logo_url:
+        logos = team.get("logos") or []
+        if logos:
+            logo_url = logos[0].get("href")
+    if not logo_url:
+        return None
+
+    try:
+        raw, content_type = get_bytes(logo_url)
+        if not raw:
+            return None
+        mime = content_type or "image/png"
+        return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+    except Exception:
+        return logo_url
 
 def main():
     output = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
-        "teams": []
+        "source": "ESPN",
+        "teams": [],
     }
 
     for team in TEAMS:
         record = dict(team)
         try:
-            past = api_json(f"/team/{team['id']}/events/last/0")
-            future = api_json(f"/team/{team['id']}/events/next/0")
-            record["past"] = compact_event(first_event(past))
-            record["next"] = compact_event(first_event(future))
-            record["badge"] = fetch_badge(team["id"])
+            payload = schedule_payload(team)
+            past, future = choose_events(payload)
+            record["past"] = past
+            record["next"] = future
+            record["badge"] = team_badge(payload)
             record["ok"] = True
             record["error"] = None
         except Exception as exc:
