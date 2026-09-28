@@ -13,7 +13,7 @@ TEAMS = [
         "teamUrl": "https://www.sofascore.com/football/team/tottenham-hotspur/33",
     },
     {
-        "id": 4196, "espnId": 25898, "name": "Bath Rugby",
+        "id": 4196, "espnId": 25898, "sportsDbId": 135199, "name": "Bath Rugby",
         "sport": "Rugby Union", "apiSport": "rugby", "espnSport": "rugby",
         "teamUrl": "https://www.sofascore.com/rugby/team/bath-rugby/4196",
     },
@@ -23,7 +23,7 @@ TEAMS = [
         "teamUrl": "https://www.sofascore.com/football/team/england/4713",
     },
     {
-        "id": 4226, "espnId": 1, "name": "England Rugby",
+        "id": 4226, "espnId": 1, "sportsDbId": 137123, "name": "England Rugby",
         "sport": "Rugby Union", "apiSport": "rugby", "espnSport": "rugby",
         "teamUrl": "https://www.sofascore.com/rugby/team/england/4226",
     },
@@ -187,77 +187,92 @@ def soccer_data(team):
         raise RuntimeError("; ".join(errors) or "No ESPN soccer events")
     return events, logo_payload or {}
 
-def rugby_data(team):
-    now = datetime.now(timezone.utc)
-    start = (now - timedelta(days=365)).strftime("%Y%m%d")
-    end = (now + timedelta(days=365)).strftime("%Y%m%d")
-    params = urllib.parse.urlencode({
-        "league": "all",
-        "region": "uk",
-        "lang": "en",
-        "contentorigin": "espn",
-        "limit": 500,
-        "dates": f"{start}-{end}",
-        "tz": "Europe/London",
-    })
-    urls = [
-        f"https://site.web.api.espn.com/apis/site/v2/sports/rugby/scorepanel?{params}",
-        f"https://site.api.espn.com/apis/site/v2/sports/rugby/scoreboard?dates={start}-{end}&limit=500",
-    ]
+def sportsdb_event(event):
+    if not event:
+        return None
 
-    errors = []
-    for url in urls:
+    timestamp = event.get("strTimestamp")
+    dt = parse_time(timestamp)
+
+    if not dt:
+        date = event.get("dateEvent")
+        time = event.get("strTime") or "00:00:00"
+        if date:
+            dt = parse_time(f"{date}T{time}+00:00")
+
+    def clean_score(value):
+        if value in (None, ""):
+            return None
         try:
-            payload = get_json(url)
-            events = payload.get("events") or []
-            matching = []
-            for event in events:
-                _, home, away = pick_competitors(event)
-                ids = {competitor_id(home), competitor_id(away)}
-                if str(team["espnId"]) in ids:
-                    matching.append(event)
-            if matching:
-                return matching, payload
-        except Exception as exc:
-            errors.append(str(exc))
-    # Diagnostic fallback: inspect the public ESPN team page for embedded data.
-    slug = "bath-rugby" if team["espnId"] == 25898 else "england"
-    page_url = f"https://www.espn.co.uk/rugby/team/_/id/{team['espnId']}/{slug}"
-    try:
-        raw, _ = get_bytes(page_url)
-        html = raw.decode("utf-8", errors="replace")
-        print(f"RUGBY_PAGE {team['name']} length={len(html)}")
-        for marker in ("__NEXT_DATA__", "__espnfitt__", "fixtures", "events", "teamSchedule"):
-            pos = html.find(marker)
-            if pos >= 0:
-                start = max(0, pos - 500)
-                end = min(len(html), pos + 1800)
-                print(f"MARKER {marker} POS {pos}")
-                print(html[start:end])
-                break
-    except Exception as page_exc:
-        print(f"RUGBY_PAGE_ERROR {team['name']}: {page_exc}")
-    raise RuntimeError("; ".join(errors) or "No matching ESPN rugby events")
+            return int(value)
+        except Exception:
+            return value
+
+    event_id = event.get("idEvent")
+    return {
+        "id": event_id,
+        "startTimestamp": int(dt.timestamp()) if dt else None,
+        "homeTeam": {
+            "name": event.get("strHomeTeam"),
+            "slug": None,
+        },
+        "awayTeam": {
+            "name": event.get("strAwayTeam"),
+            "slug": None,
+        },
+        "homeScore": clean_score(event.get("intHomeScore")),
+        "awayScore": clean_score(event.get("intAwayScore")),
+        "tournament": event.get("strLeague") or event.get("strEventAlternate") or "",
+        "eventUrl": f"https://www.thesportsdb.com/event/{event_id}" if event_id else None,
+    }
+
+def rugby_data(team):
+    team_id = team["sportsDbId"]
+    base = "https://www.thesportsdb.com/api/v1/json/123"
+
+    last_payload = get_json(f"{base}/eventslast.php?id={team_id}")
+    next_payload = get_json(f"{base}/eventsnext.php?id={team_id}")
+    team_payload = get_json(f"{base}/lookupteam.php?id={team_id}")
+
+    previous_events = last_payload.get("results") or last_payload.get("events") or []
+    next_events = next_payload.get("events") or next_payload.get("results") or []
+
+    previous = sportsdb_event(previous_events[0]) if previous_events else None
+    upcoming = sportsdb_event(next_events[0]) if next_events else None
+
+    if previous is None and upcoming is None:
+        raise RuntimeError("TheSportsDB returned no rugby fixtures")
+
+    return previous, upcoming, team_payload
 
 def team_badge(payload, team):
     logo_url = None
-    info = payload.get("team") if isinstance(payload, dict) else None
-    if isinstance(info, dict):
-        logo_url = info.get("logo")
-        if not logo_url:
-            logos = info.get("logos") or []
-            if logos:
-                logo_url = logos[0].get("href")
 
+    # TheSportsDB rugby team lookup.
+    teams = payload.get("teams") if isinstance(payload, dict) else None
+    if teams:
+        info = teams[0] or {}
+        logo_url = info.get("strBadge") or info.get("strLogo")
+
+    # ESPN soccer schedule payload.
     if not logo_url:
-        for event in payload.get("events") or [] if isinstance(payload, dict) else []:
+        info = payload.get("team") if isinstance(payload, dict) else None
+        if isinstance(info, dict):
+            logo_url = info.get("logo")
+            if not logo_url:
+                logos = info.get("logos") or []
+                if logos:
+                    logo_url = logos[0].get("href")
+
+    if not logo_url and isinstance(payload, dict):
+        for event in payload.get("events") or []:
             _, home, away = pick_competitors(event)
             for competitor in (home, away):
                 if competitor_id(competitor) == str(team["espnId"]):
-                    t = competitor.get("team") or {}
-                    logo_url = t.get("logo")
+                    info = competitor.get("team") or {}
+                    logo_url = info.get("logo")
                     if not logo_url:
-                        logos = t.get("logos") or []
+                        logos = info.get("logos") or []
                         if logos:
                             logo_url = logos[0].get("href")
                     if logo_url:
@@ -280,7 +295,7 @@ def team_badge(payload, team):
 def main():
     output = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
-        "source": "ESPN",
+        "source": "ESPN + TheSportsDB",
         "teams": [],
     }
 
@@ -289,10 +304,10 @@ def main():
         try:
             if team["espnSport"] == "soccer":
                 events, payload = soccer_data(team)
+                past, future = choose_events(events)
             else:
-                events, payload = rugby_data(team)
+                past, future, payload = rugby_data(team)
 
-            past, future = choose_events(events)
             record["past"] = past
             record["next"] = future
             record["badge"] = team_badge(payload, team)
