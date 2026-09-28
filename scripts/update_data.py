@@ -13,7 +13,7 @@ TEAMS = [
         "teamUrl": "https://www.sofascore.com/football/team/tottenham-hotspur/33",
     },
     {
-        "id": 4196, "espnId": 25898, "sportsDbId": 135199, "name": "Bath Rugby",
+        "id": 4196, "espnId": 25898, "sportsDbId": 135199, "sportsDbLeagues": [4414, 4550, 5695], "sportsDbSeasons": ["2025-2026", "2026-2027"], "name": "Bath Rugby",
         "sport": "Rugby Union", "apiSport": "rugby", "espnSport": "rugby",
         "teamUrl": "https://www.sofascore.com/rugby/team/bath-rugby/4196",
     },
@@ -23,7 +23,7 @@ TEAMS = [
         "teamUrl": "https://www.sofascore.com/football/team/england/4713",
     },
     {
-        "id": 4226, "espnId": 1, "sportsDbId": 137123, "name": "England Rugby",
+        "id": 4226, "espnId": 1, "sportsDbId": 137123, "sportsDbLeagues": [4714, 5852, 5479], "sportsDbSeasons": ["2026"], "name": "England Rugby",
         "sport": "Rugby Union", "apiSport": "rugby", "espnSport": "rugby",
         "teamUrl": "https://www.sofascore.com/rugby/team/england/4226",
     },
@@ -304,23 +304,74 @@ def sportsdb_event(event):
     }
 
 def rugby_data(team):
-    team_id = team["sportsDbId"]
+    team_id = str(team["sportsDbId"])
     base = "https://www.thesportsdb.com/api/v1/json/123"
 
-    last_payload = get_json(f"{base}/eventslast.php?id={team_id}")
-    next_payload = get_json(f"{base}/eventsnext.php?id={team_id}")
     team_payload = get_json(f"{base}/lookupteam.php?id={team_id}")
+    all_events = []
 
-    previous_events = last_payload.get("results") or last_payload.get("events") or []
-    next_events = next_payload.get("events") or next_payload.get("results") or []
+    # Team endpoints are useful as a fallback, but can favour the primary league.
+    for endpoint, key_names in (
+        ("eventslast.php", ("results", "events")),
+        ("eventsnext.php", ("events", "results")),
+    ):
+        try:
+            payload = get_json(f"{base}/{endpoint}?id={team_id}")
+            for key in key_names:
+                if payload.get(key):
+                    all_events.extend(payload[key])
+                    break
+        except Exception:
+            pass
 
-    previous = sportsdb_event(previous_events[0]) if previous_events else None
-    upcoming = sportsdb_event(next_events[0]) if next_events else None
+    # Merge the team's known competitions so "last match" really means the
+    # most recent match across league, cup and international competitions.
+    for league_id in team.get("sportsDbLeagues", []):
+        for season in team.get("sportsDbSeasons", []):
+            try:
+                payload = get_json(
+                    f"{base}/eventsseason.php?id={league_id}&s={urllib.parse.quote(season)}"
+                )
+                for event in payload.get("events") or []:
+                    home_id = str(event.get("idHomeTeam") or "")
+                    away_id = str(event.get("idAwayTeam") or "")
+                    if team_id in (home_id, away_id):
+                        all_events.append(event)
+            except Exception:
+                pass
 
-    if previous is None and upcoming is None:
+    compact = []
+    seen = set()
+    for event in all_events:
+        event_id = str(event.get("idEvent") or "")
+        if event_id and event_id in seen:
+            continue
+        if event_id:
+            seen.add(event_id)
+        parsed = sportsdb_event(event)
+        if parsed and parsed.get("startTimestamp"):
+            compact.append(parsed)
+
+    if not compact:
         raise RuntimeError("TheSportsDB returned no rugby fixtures")
 
-    return previous, upcoming, team_payload
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    completed = [
+        event for event in compact
+        if event["startTimestamp"] <= now_ts
+        and event.get("homeScore") is not None
+        and event.get("awayScore") is not None
+    ]
+    upcoming = [
+        event for event in compact
+        if event["startTimestamp"] >= now_ts
+        and (event.get("homeScore") is None or event.get("awayScore") is None)
+    ]
+
+    previous = max(completed, key=lambda e: e["startTimestamp"]) if completed else None
+    future = min(upcoming, key=lambda e: e["startTimestamp"]) if upcoming else None
+
+    return previous, future, team_payload
 
 def team_badge(payload, team):
     logo_url = None
