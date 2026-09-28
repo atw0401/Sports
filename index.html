@@ -202,38 +202,12 @@
   </main>
 
   <script>
-    const teams = [
-      {
-        id:33,
-        name:"Tottenham Hotspur",
-        sport:"Football",
-        apiSport:"football",
-        teamUrl:"https://www.sofascore.com/football/team/tottenham-hotspur/33"
-      },
-      {
-        id:4196,
-        name:"Bath Rugby",
-        sport:"Rugby Union",
-        apiSport:"rugby",
-        teamUrl:"https://www.sofascore.com/rugby/team/bath-rugby/4196"
-      },
-      {
-        id:4713,
-        name:"England Football",
-        sport:"Football",
-        apiSport:"football",
-        teamUrl:"https://www.sofascore.com/football/team/england/4713"
-      },
-      {
-        id:4226,
-        name:"England Rugby",
-        sport:"Rugby Union",
-        apiSport:"rugby",
-        teamUrl:"https://www.sofascore.com/rugby/team/england/4226"
-      }
+    const fallbackTeams = [
+      {id:33,name:"Tottenham Hotspur",sport:"Football",apiSport:"football",teamUrl:"https://www.sofascore.com/football/team/tottenham-hotspur/33"},
+      {id:4196,name:"Bath Rugby",sport:"Rugby Union",apiSport:"rugby",teamUrl:"https://www.sofascore.com/rugby/team/bath-rugby/4196"},
+      {id:4713,name:"England Football",sport:"Football",apiSport:"football",teamUrl:"https://www.sofascore.com/football/team/england/4713"},
+      {id:4226,name:"England Rugby",sport:"Rugby Union",apiSport:"rugby",teamUrl:"https://www.sofascore.com/rugby/team/england/4226"}
     ];
-
-    const API = "https://api.sofascore.com/api/v1";
 
     function esc(value){
       return String(value ?? "")
@@ -244,14 +218,13 @@
     }
 
     function score(event){
-      const home =
-        event?.homeScore?.current ??
-        event?.homeScore?.display ??
-        event?.homeScore?.normaltime;
-      const away =
-        event?.awayScore?.current ??
-        event?.awayScore?.display ??
-        event?.awayScore?.normaltime;
+      if(!event) return "";
+      const home = typeof event.homeScore === "object"
+        ? (event.homeScore?.current ?? event.homeScore?.display ?? event.homeScore?.normaltime)
+        : event.homeScore;
+      const away = typeof event.awayScore === "object"
+        ? (event.awayScore?.current ?? event.awayScore?.display ?? event.awayScore?.normaltime)
+        : event.awayScore;
       if(home == null || away == null) return "Final";
       return `${home} - ${away}`;
     }
@@ -260,22 +233,19 @@
       if(!timestamp) return "Date TBC";
       const date = new Date(timestamp * 1000);
       const day = new Intl.DateTimeFormat("en-GB",{
-        weekday:"short",
-        day:"numeric",
-        month:"short",
-        timeZone:"Europe/London"
+        weekday:"short",day:"numeric",month:"short",timeZone:"Europe/London"
       }).format(date);
       const time = new Intl.DateTimeFormat("en-GB",{
-        hour:"2-digit",
-        minute:"2-digit",
-        hour12:false,
-        timeZone:"Europe/London"
+        hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"Europe/London"
       }).format(date);
       return `${day} · ${time}`;
     }
 
     function competition(event){
-      return event?.tournament?.name || event?.uniqueTournament?.name || "";
+      if(!event) return "";
+      return typeof event.tournament === "string"
+        ? event.tournament
+        : (event?.tournament?.name || event?.uniqueTournament?.name || "");
     }
 
     function matchTeams(event){
@@ -283,9 +253,10 @@
       return `${esc(event.homeTeam?.name || "TBC")} vs ${esc(event.awayTeam?.name || "TBC")}`;
     }
 
-    function matchUrl(event, fallbackSport){
+    function matchUrl(event,fallbackSport){
       if(!event?.id) return "";
       const sport =
+        event?.sportSlug ||
         event?.tournament?.category?.sport?.slug ||
         event?.sport?.slug ||
         fallbackSport ||
@@ -301,52 +272,11 @@
       return `https://www.sofascore.com/event/${event.id}`;
     }
 
-    function saveSnapshot(teamId,data){
-      try{
-        localStorage.setItem(`mySports:${teamId}`,JSON.stringify({
-          savedAt:Date.now(),
-          data
-        }));
-      }catch(e){}
-    }
-
-    function loadSnapshot(teamId){
-      try{
-        const raw = localStorage.getItem(`mySports:${teamId}`);
-        return raw ? JSON.parse(raw) : null;
-      }catch(e){
-        return null;
-      }
-    }
-
-    async function getJson(url){
-      const response = await fetch(url,{cache:"no-store"});
-      if(!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
-    }
-
-    async function loadTeam(team){
-      const [past,next] = await Promise.all([
-        getJson(`${API}/team/${team.id}/events/last/0`),
-        getJson(`${API}/team/${team.id}/events/next/0`)
-      ]);
-
-      const data = {
-        past:past?.events?.[0] || null,
-        next:next?.events?.[0] || null
-      };
-      saveSnapshot(team.id,data);
-      return data;
-    }
-
     function shell(team){
       return `
         <article class="card" id="team-${team.id}">
           <a class="team" href="${team.teamUrl}" aria-label="Open ${esc(team.name)} in SofaScore">
-            <img class="badge"
-              src="${API}/team/${team.id}/image"
-              alt=""
-              onerror="this.style.visibility='hidden'">
+            <img class="badge" alt="" style="visibility:hidden">
             <div class="team-copy">
               <div class="team-name">${esc(team.name)}</div>
               <div class="sport">${esc(team.sport)} · Tap for team</div>
@@ -386,49 +316,91 @@
         <div class="competition">${esc(competition(event))}</div>`;
     }
 
+    function cacheData(data){
+      try{ localStorage.setItem("mySports:data",JSON.stringify(data)); }catch(e){}
+    }
+
+    function cachedData(){
+      try{
+        const raw = localStorage.getItem("mySports:data");
+        return raw ? JSON.parse(raw) : null;
+      }catch(e){
+        return null;
+      }
+    }
+
+    function renderData(data){
+      const byId = new Map((data?.teams || []).map(team=>[team.id,team]));
+
+      fallbackTeams.forEach(meta=>{
+        const team = byId.get(meta.id) || meta;
+        const card = document.getElementById(`team-${meta.id}`);
+        const badge = card.querySelector(".badge");
+        const previous = card.querySelector(".previous");
+        const next = card.querySelector(".next");
+
+        if(team.badge){
+          badge.src = team.badge;
+          badge.style.visibility = "visible";
+        }
+
+        if(team.ok === false && !team.past && !team.next){
+          const message = `
+            <div class="label">Data temporarily unavailable</div>
+            <div class="error">The background sports feed will retry automatically.</div>`;
+          previous.innerHTML = message;
+          next.innerHTML = message;
+          return;
+        }
+
+        renderMatch(previous,team.past,true,team.apiSport || meta.apiSport);
+        renderMatch(next,team.next,false,team.apiSport || meta.apiSport);
+      });
+
+      if(data?.updatedAt){
+        const date = new Date(data.updatedAt);
+        document.getElementById("updated").textContent =
+          "Data " + new Intl.DateTimeFormat("en-GB",{
+            day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",
+            hour12:false,timeZone:"Europe/London"
+          }).format(date);
+      }else{
+        document.getElementById("updated").textContent = "Data loaded";
+      }
+    }
+
     async function refresh(){
       const button = document.getElementById("refresh");
       button.disabled = true;
       document.getElementById("updated").textContent = "Refreshing…";
 
-      await Promise.all(teams.map(async team => {
-        const card = document.getElementById(`team-${team.id}`);
-        const previous = card.querySelector(".previous");
-        const next = card.querySelector(".next");
-
-        try{
-          const data = await loadTeam(team);
-          renderMatch(previous,data.past,true,team.apiSport);
-          renderMatch(next,data.next,false,team.apiSport);
-        }catch(error){
-          const cached = loadSnapshot(team.id);
-          if(cached?.data){
-            renderMatch(previous,cached.data.past,true,team.apiSport);
-            renderMatch(next,cached.data.next,false,team.apiSport);
-          }else{
+      try{
+        const response = await fetch(`./data.json?v=${Date.now()}`,{cache:"no-store"});
+        if(!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        cacheData(data);
+        renderData(data);
+      }catch(error){
+        const cached = cachedData();
+        if(cached){
+          renderData(cached);
+        }else{
+          document.getElementById("updated").textContent = "Waiting for sports data…";
+          fallbackTeams.forEach(meta=>{
+            const card = document.getElementById(`team-${meta.id}`);
             const message = `
-              <div class="label">Data unavailable</div>
-              <div class="error">Could not reach the live sports feed. Tap Refresh to try again.</div>`;
-            previous.innerHTML = message;
-            next.innerHTML = message;
-          }
+              <div class="label">Preparing data</div>
+              <div class="error">The app is waiting for its first background update.</div>`;
+            card.querySelector(".previous").innerHTML = message;
+            card.querySelector(".next").innerHTML = message;
+          });
         }
-      }));
-
-      const now = new Intl.DateTimeFormat("en-GB",{
-        hour:"2-digit",
-        minute:"2-digit",
-        hour12:false,
-        day:"numeric",
-        month:"short",
-        timeZone:"Europe/London"
-      }).format(new Date());
-
-      document.getElementById("updated").textContent = `Updated ${now}`;
-      button.disabled = false;
+      }finally{
+        button.disabled = false;
+      }
     }
 
-    document.getElementById("grid").innerHTML = teams.map(shell).join("");
+    document.getElementById("grid").innerHTML = fallbackTeams.map(shell).join("");
     document.getElementById("refresh").addEventListener("click",refresh);
 
     document.addEventListener("visibilitychange",()=>{
