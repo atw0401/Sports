@@ -220,6 +220,23 @@ def rugby_data(team):
                 return matching, payload
         except Exception as exc:
             errors.append(str(exc))
+    # Diagnostic fallback: inspect the public ESPN team page for embedded data.
+    slug = "bath-rugby" if team["espnId"] == 25898 else "england"
+    page_url = f"https://www.espn.co.uk/rugby/team/_/id/{team['espnId']}/{slug}"
+    try:
+        raw, _ = get_bytes(page_url)
+        html = raw.decode("utf-8", errors="replace")
+        print(f"RUGBY_PAGE {team['name']} length={len(html)}")
+        for marker in ("__NEXT_DATA__", "__espnfitt__", "fixtures", "events", "teamSchedule"):
+            pos = html.find(marker)
+            if pos >= 0:
+                start = max(0, pos - 500)
+                end = min(len(html), pos + 1800)
+                print(f"MARKER {marker} POS {pos}")
+                print(html[start:end])
+                break
+    except Exception as page_exc:
+        print(f"RUGBY_PAGE_ERROR {team['name']}: {page_exc}")
     raise RuntimeError("; ".join(errors) or "No matching ESPN rugby events")
 
 def team_badge(payload, team):
